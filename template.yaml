@@ -27,6 +27,8 @@ Resources:
             Value: !Ref UserPool
           - Name: USER_POOL_ARN
             Value: !GetAtt UserPool.Arn
+          - Name: API_URL
+            Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com
       ServiceRole: !GetAtt WebsiteRole.Arn
       Source:
         Type: NO_SOURCE
@@ -180,6 +182,82 @@ Resources:
     Type: AWS::Cognito::UserPoolClient
     Properties:
       UserPoolId: !Ref UserPool
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      DefinitionBody:
+        openapi: '3.0'
+        info:
+          title: !Sub ${AWS::StackName}-HttpApi
+          version: '1.0'
+        paths:
+          /ride:
+            post:
+              responses: {}
+      FailOnWarnings: true
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowHeaders:
+          - Authorization
+          - Content-Type
+        AllowMethods:
+          - '*'
+      Auth:
+        Authorizers:
+          Authorizer:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}
+              audience:
+                - !Ref UserPoolClient
+        DefaultAuthorizer: Authorizer
+  RequestUnicorn:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-RequestUnicorn
+      Description: !Sub
+        - Stack ${StackTagName} Environment ${EnvironmentTagName} Function ${ResourceName}
+        - ResourceName: RequestUnicorn
+      CodeUri: src/RequestUnicorn
+      Handler: index.handler
+      Runtime: nodejs14.x
+      MemorySize: 3008
+      Timeout: 30
+      Tracing: Active
+      Policies:
+        - AWSXrayWriteOnlyAccess
+        - DynamoDBCrudPolicy:
+            TableName: !Ref Rides
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:/${EnvironmentTagName}/*
+      Environment:
+        Variables:
+          UNICORN_STABLE_API: !Ref EnvConfigunicornStableApiAsString
+          TABLE_NAME: !Ref Rides
+          TABLE_ARN: !GetAtt Rides.Arn
+          SECRETS_NAMESPACE: !Sub /${EnvironmentTagName}/
+      Events:
+        HttpApiPOSTride:
+          Type: HttpApi
+          Properties:
+            Path: /ride
+            Method: POST
+            ApiId: !Ref HttpApi
+            PayloadFormatVersion: '2.0'
+            TimeoutInMillis: 29000
+  Rides:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: RideId
+          AttributeType: S
+      BillingMode: PAY_PER_REQUEST
+      KeySchema:
+        - AttributeName: RideId
+          KeyType: HASH
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
 Parameters:
   SourceLocation:
     Type: String
@@ -187,3 +265,15 @@ Parameters:
   SourceVersion:
     Type: String
     Description: Source version for deployment (injected by Stackery at deployment time)
+  StackTagName:
+    Type: String
+    Description: Stack Name (injected by Stackery at deployment time)
+  EnvironmentTagName:
+    Type: String
+    Description: Environment Name (injected by Stackery at deployment time)
+  EnvConfigunicornStableApiAsString:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /<EnvironmentName>/unicornStableApi
+Metadata:
+  EnvConfigParameters:
+    EnvConfigunicornStableApiAsString: unicornStableApi
