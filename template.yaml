@@ -20,7 +20,13 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
         Type: LINUX_CONTAINER
-        EnvironmentVariables: []
+        EnvironmentVariables:
+          - Name: USER_POOL_CLIENT_ID
+            Value: !Ref UserPoolClient
+          - Name: USER_POOL_ID
+            Value: !Ref UserPool
+          - Name: USER_POOL_ARN
+            Value: !GetAtt UserPool.Arn
       ServiceRole: !GetAtt WebsiteRole.Arn
       Source:
         Type: NO_SOURCE
@@ -159,6 +165,21 @@ Resources:
       Type: website
       ProjectName: !Ref Website
       SourceVersion: !Ref SourceVersion
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      AliasAttributes:
+        - email
+        - preferred_username
+      UserPoolName: !Sub ${AWS::StackName}-UserPool
+      AutoVerifiedAttributes:
+        - email
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
 Parameters:
   SourceLocation:
     Type: String
